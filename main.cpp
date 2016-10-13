@@ -367,7 +367,7 @@ void get_gip(char * GIP)
 }
 
 
-int arp_get_sender_packet(const u_char * packet, char * DIP, FILE *fp)
+int arp_get_sender_packet(const u_char * packet, char * DIP, struct ether_addr *dmac, FILE *fp)
 {
     struct ip_header * iph;
     int plen;
@@ -384,6 +384,14 @@ int arp_get_sender_packet(const u_char * packet, char * DIP, FILE *fp)
     if(ntohs(  (eh->ether_type)  ) != protocol_num[ipv4])
     {
         //printf("protocol : %2x\n", ntohs(*(unsigned short *)(packet+12)));
+        return 0;
+    }
+
+    //if eth_dst is not me, drop
+    //ddddddddddddddddddddddddddddddddddddd this is little weird
+    if(!memcmp(&(eh->ether_dhost), dmac, 6))
+    {
+        //printf("this is already relayed packet\n");
         return 0;
     }
 
@@ -643,7 +651,7 @@ int main(int argc, char * argv[]) //int main(int argc, char *argv[])
                break;
            }
 
-           if(arp_get_sender_packet(packet, DIP, fp_spoofed_packet))
+           if(arp_get_sender_packet(packet, DIP, dmac, fp_spoofed_packet))
            {
                finish = clock();
                sender_relay(packet, *gmac, GIP, handle);
@@ -660,7 +668,7 @@ int main(int argc, char * argv[]) //int main(int argc, char *argv[])
        printf("send spoof\n");
 
        //sleep(spoofing_period);
-   }if(arp_get_sender_packet(packet, DIP, fp_spoofed_packet))
+   }if(arp_get_sender_packet(packet, DIP, dmac, fp_spoofed_packet))
        printf("get sender packet\n");
 
    pcap_close(handle);
